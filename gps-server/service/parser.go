@@ -137,20 +137,28 @@ func ParseJT808Location(data []byte) (*GpsData, string) {
 	
 	// Message Body for 0x0200:
 	// Alarm(4) + Status(4) + Lat(4) + Lon(4) + Alt(2) + Speed(2) + Course(2) + Time(6)
+	statusRaw := binary.BigEndian.Uint32(body[4:8])
 	latRaw := binary.BigEndian.Uint32(body[8:12])
 	lonRaw := binary.BigEndian.Uint32(body[12:16])
 	alt := binary.BigEndian.Uint16(body[16:18])
-	speedRaw := binary.BigEndian.Uint16(body[18:20]) // 1/10 km/h
+	speedRaw := binary.BigEndian.Uint16(body[18:20])
 	course := binary.BigEndian.Uint16(body[20:22])
 	
+	// JT808 Status Bits:
+	// Bit 0: 0=ACC Off, 1=ACC On
+	// Bit 1: 0=Not Fixed, 1=Fixed
+	ignition := (statusRaw & 0x00000001) != 0
+	fixed := (statusRaw & 0x00000002) != 0
+	
 	return &GpsData{
-		Time:      time.Now(), // We can parse body[22:28] for exact BCD time if needed
+		Time:      time.Now(),
 		Latitude:  float64(latRaw) / 1000000.0,
 		Longitude: float64(lonRaw) / 1000000.0,
 		Speed:     float64(speedRaw) / 10.0,
 		Course:    course,
-		Valid:     true,
-		RSSI:      int(alt), // Storing altitude here for now to see it in logs
+		Valid:     fixed,
+		Ignition:  ignition,
+		RSSI:      int(alt),
 	}, phone
 }
 

@@ -142,7 +142,15 @@ func (s *session) processJT808(data []byte) {
 		gps, id := service.ParseJT808Location(decoded)
 		if gps != nil {
 			s.imei = id
-			fmt.Printf("📍 JT808 GPS [%s]: Lat: %.6f, Lng: %.6f\n", s.imei, gps.Latitude, gps.Longitude)
+			status := "📡 NO FIX"
+			if gps.Valid {
+				status = "🛰️ FIXED"
+			}
+			acc := "OFF"
+			if gps.Ignition {
+				acc = "ON"
+			}
+			fmt.Printf("📍 JT808 GPS [%s] %s | ACC: %s | Lat: %.6f, Lng: %.6f\n", s.imei, status, acc, gps.Latitude, gps.Longitude)
 		}
 		s.sendJT808ACK(decoded, 0)
 
