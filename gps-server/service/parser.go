@@ -190,32 +190,54 @@ func ParseJT808Location(decoded []byte) (*GpsData, string) {
 	var gpsTime time.Time
 	if len(body) >= 28 {
 		year := 2000 + int(body[22]>>4)*10 + int(body[22]&0x0F)
-		month := int(body[23]>>4)*10 + int(body[23]&0x0F)
+		month := time.Month(int(body[23]>>4)*10 + int(body[23]&0x0F))
 		day := int(body[24]>>4)*10 + int(body[24]&0x0F)
 		hour := int(body[25]>>4)*10 + int(body[25]&0x0F)
 		minute := int(body[26]>>4)*10 + int(body[26]&0x0F)
 		second := int(body[27]>>4)*10 + int(body[27]&0x0F)
-		gpsTime = time.Date(year, time.Month(month), day, hour, minute, second, 0, time.UTC)
+		gpsTime = time.Date(year, month, day, hour, minute, second, 0, time.UTC)
 	}
 
 	// Status bits
 	ignition := (statusRaw & 0x00000001) != 0
 	fixed := (statusRaw & 0x00000002) != 0
 
+	// Parse Additional Information (TLV items) starting at body[28]
+	sats := 0
+	rssi := int(alt)
+	extra := body[28:]
+	for i := 0; i+2 <= len(extra); {
+		id := extra[i]
+		length := int(extra[i+1])
+		if i+2+length > len(extra) {
+			break
+		}
+		value := extra[i+2 : i+2+length]
+		
+		switch id {
+		case 0x30: // Signal Strength
+			if length >= 1 { rssi = int(value[0]) }
+		case 0x31: // Satellites
+			if length >= 1 { sats = int(value[0]) }
+		}
+		i += 2 + length
+	}
+
 	// Debug: show raw values
-	fmt.Printf("   🔍 RAW: Alarm=0x%08X Status=0x%08X Lat=%d Lon=%d Alt=%d Speed=%d Course=%d\n",
-		alarmRaw, statusRaw, latRaw, lonRaw, alt, speedRaw, course)
+	fmt.Printf("   🔍 RAW: Alarm=0x%08X Status=0x%08X Lat=%d Lon=%d Sats=%d RSSI=%d\n",
+		alarmRaw, statusRaw, latRaw, lonRaw, sats, rssi)
 
 	return &GpsData{
-		Time:      gpsTime,
-		Latitude:  float64(latRaw) / 1000000.0,
-		Longitude: float64(lonRaw) / 1000000.0,
-		Speed:     float64(speedRaw) / 10.0,
-		Course:    course,
-		Valid:     fixed,
-		Ignition:  ignition,
-		Alarm:     alarmRaw,
-		RSSI:      int(alt),
+		Time:       gpsTime,
+		Latitude:   float64(latRaw) / 1000000.0,
+		Longitude:  float64(lonRaw) / 1000000.0,
+		Speed:      float64(speedRaw) / 10.0,
+		Course:     course,
+		Valid:      fixed,
+		Ignition:   ignition,
+		Alarm:      alarmRaw,
+		Satellites: sats,
+		RSSI:       rssi,
 	}, phone
 }
 
