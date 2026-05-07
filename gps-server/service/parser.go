@@ -90,9 +90,6 @@ func ParseGPS(data []byte) (*GpsData, error) {
 	if (courseStatus & 0x0800) != 0 { longitude = -longitude }
 	valid := (courseStatus & 0x1000) != 0
 
-	// Check for optional terminal info at the end of some GPS packets
-	// Usually: [GPS Data] [LBS Data] [Terminal Info] ...
-	// This varies by model, but we can try to extract if packet is long enough
 	return &GpsData{
 		Time:       gpsTime,
 		Latitude:   latitude,
@@ -102,6 +99,53 @@ func ParseGPS(data []byte) (*GpsData, error) {
 		Valid:      valid,
 		Satellites: sats,
 	}, nil
+}
+
+// DecodeJT808 handles the unescaping logic for JT808 protocol
+func DecodeJT808(data []byte) []byte {
+	if len(data) < 2 {
+		return data
+	}
+	// Remove start/end 0x7E
+	body := data[1 : len(data)-1]
+	decoded := make([]byte, 0, len(body))
+	for i := 0; i < len(body); i++ {
+		if body[i] == 0x7D && i+1 < len(body) {
+			if body[i+1] == 0x01 {
+				decoded = append(decoded, 0x7D)
+				i++
+			} else if body[i+1] == 0x02 {
+				decoded = append(decoded, 0x7E)
+				i++
+			}
+		} else {
+			decoded = append(decoded, body[i])
+		}
+	}
+	return decoded
+}
+
+// ParseJT808Location extracts GPS from a 0x0200 message
+func ParseJT808Location(data []byte) (*GpsData, string) {
+	// Header: ID(2) + Property(2) + Phone(6 BCD) + Seq(2) = 12 bytes
+	if len(data) < 28 {
+		return nil, ""
+	}
+	
+	// Phone number is the Device ID in JT808 (6 bytes BCD)
+	phone := hex.EncodeToString(data[4:10])
+	
+	// Message Body starts at index 12 (assuming no sub-packets)
+	body := data[12:]
+	
+	latRaw := binary.BigEndian.Uint32(body[4:8])
+	lonRaw := binary.BigEndian.Uint32(body[8:12])
+	
+	return &GpsData{
+		Latitude:  float64(latRaw) / 1000000.0,
+		Longitude: float64(lonRaw) / 1000000.0,
+		Valid:     true,
+	}, phone
 }
 
 // GetSequenceIndex extracts the sequence number from the end of the packet

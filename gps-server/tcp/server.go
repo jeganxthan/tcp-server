@@ -57,12 +57,30 @@ func handleConnection(conn net.Conn) {
 		}
 		buffer = append(buffer, tmp[:n]...)
 
-		// Frame decoding loop (inspired by Traccar's Gt06FrameDecoder)
+		// Frame decoding loop (Supports both GT06 and JT808)
 		for len(buffer) >= 5 {
 			var length int
-			if buffer[0] == 0x78 && buffer[1] == 0x78 {
+			if buffer[0] == 0x7E {
+				// 🎥 JT808 Frame decoding
+				foundEnd := -1
+				for i := 1; i < len(buffer); i++ {
+					if buffer[i] == 0x7E {
+						foundEnd = i
+						break
+					}
+				}
+				if foundEnd == -1 {
+					break // Wait for more data
+				}
+				packet := buffer[:foundEnd+1]
+				buffer = buffer[foundEnd+1:]
+				s.processJT808(packet)
+				continue
+			} else if buffer[0] == 0x78 && buffer[1] == 0x78 {
+				// 📦 GT06 Standard
 				length = int(buffer[2]) + 5
 			} else if buffer[0] == 0x79 && buffer[1] == 0x79 {
+				// 📦 GT06 Extended
 				if len(buffer) < 6 {
 					break
 				}
@@ -71,7 +89,7 @@ func handleConnection(conn net.Conn) {
 				// Search for next possible header to recover from bad data
 				found := false
 				for i := 1; i < len(buffer)-1; i++ {
-					if (buffer[i] == 0x78 && buffer[i+1] == 0x78) || (buffer[i] == 0x79 && buffer[i+1] == 0x79) {
+					if buffer[i] == 0x7E || (buffer[i] == 0x78 && buffer[i+1] == 0x78) || (buffer[i] == 0x79 && buffer[i+1] == 0x79) {
 						buffer = buffer[i:]
 						found = true
 						break
@@ -84,16 +102,62 @@ func handleConnection(conn net.Conn) {
 			}
 
 			if len(buffer) < length {
-				// Wait for more data
 				break
 			}
 
 			packet := buffer[:length]
 			buffer = buffer[length:]
-
 			s.processPacket(packet)
 		}
 	}
+}
+
+func (s *session) processJT808(data []byte) {
+	decoded := service.DecodeJT808(data)
+	if len(decoded) < 12 {
+		return
+	}
+
+	msgID := binary.BigEndian.Uint16(decoded[0:2])
+	phone := hex.EncodeToString(decoded[4:10])
+
+	fmt.Printf("🎥 JT808 Packet (%s) ID: 0x%04X, Phone: %s\n", s.conn.RemoteAddr(), msgID, phone)
+
+	switch msgID {
+	case 0x0100: // Terminal Register
+		fmt.Println("📝 JT808 Registering:", phone)
+		s.imei = phone
+		s.sendJT808ACK(decoded, 0)
+
+	case 0x0102: // Terminal Authentication
+		fmt.Println("🔐 JT808 Authenticating:", phone)
+		s.imei = phone
+		s.sendJT808ACK(decoded, 0)
+
+	case 0x0200: // Location Report
+		gps, id := service.ParseJT808Location(decoded)
+		if gps != nil {
+			s.imei = id
+			fmt.Printf("📍 JT808 GPS [%s]: Lat: %.6f, Lng: %.6f\n", s.imei, gps.Latitude, gps.Longitude)
+		}
+		s.sendJT808ACK(decoded, 0)
+
+	case 0x0002: // Heartbeat
+		fmt.Println("💓 JT808 Heartbeat from", phone)
+		s.sendJT808ACK(decoded, 0)
+
+	default:
+		fmt.Printf("❓ Unknown JT808 ID: 0x%04X\n", msgID)
+	}
+}
+
+func (s *session) sendJT808ACK(decoded []byte, result byte) {
+	msgID := binary.BigEndian.Uint16(decoded[0:2])
+	phone := decoded[4:10]
+	seq := binary.BigEndian.Uint16(decoded[10:12])
+
+	response := service.GenerateJT808Response(phone, 0, seq, msgID, result)
+	s.conn.Write(response)
 }
 
 func (s *session) processPacket(data []byte) {

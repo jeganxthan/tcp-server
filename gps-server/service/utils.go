@@ -37,3 +37,39 @@ func GenerateResponse(packetType byte, index uint16) []byte {
 	
 	return response
 }
+
+// JT808_Checksum calculates the XOR checksum for JT808
+func JT808_Checksum(data []byte) byte {
+	var checksum byte
+	for _, b := range data {
+		checksum ^= b
+	}
+	return checksum
+}
+
+// GenerateJT808Response creates a standard 0x8001 General Response
+func GenerateJT808Response(phone []byte, seq uint16, msgSeq uint16, msgID uint16, result byte) []byte {
+	// Body: MsgSeq(2) + MsgID(2) + Result(1) = 5 bytes
+	body := make([]byte, 5)
+	binary.BigEndian.PutUint16(body[0:2], msgSeq)
+	binary.BigEndian.PutUint16(body[2:4], msgID)
+	body[4] = result
+
+	// Header: ID(2) + Prop(2) + Phone(6) + Seq(2) = 12 bytes
+	header := make([]byte, 12)
+	binary.BigEndian.PutUint16(header[0:2], 0x8001)
+	binary.BigEndian.PutUint16(header[2:4], uint16(len(body)))
+	copy(header[4:10], phone)
+	binary.BigEndian.PutUint16(header[10:12], seq)
+
+	packet := append(header, body...)
+	checksum := JT808_Checksum(packet)
+	
+	// Escape and wrap in 0x7E (Simplified for now)
+	final := []byte{0x7E}
+	final = append(final, packet...)
+	final = append(final, checksum)
+	final = append(final, 0x7E)
+	
+	return final
+}
