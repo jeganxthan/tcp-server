@@ -118,17 +118,21 @@ func (s *session) processJT808(data []byte) {
 		return
 	}
 
-	msgID := binary.BigEndian.Uint16(decoded[0:2])
-	phone := hex.EncodeToString(decoded[4:10])
-	seq := binary.BigEndian.Uint16(decoded[10:12])
+	// Dump raw hex for debugging
+	fmt.Printf("🔬 RAW JT808 (%d bytes): %s\n", len(decoded), hex.EncodeToString(decoded))
 
-	fmt.Printf("🎥 JT808 Packet (%s) ID: 0x%04X, Phone: %s\n", s.conn.RemoteAddr(), msgID, phone)
+	bodyOffset, phone, seq, msgID, _ := service.ParseJT808Header(decoded)
+	if bodyOffset == 0 {
+		fmt.Println("⚠️ Failed to parse JT808 header")
+		return
+	}
+
+	fmt.Printf("🎥 JT808 Packet (%s) ID: 0x%04X, Phone: %s, Seq: %d\n", s.conn.RemoteAddr(), msgID, phone, seq)
 
 	switch msgID {
 	case 0x0100: // Terminal Register
 		fmt.Println("📝 JT808 Registering:", phone)
 		s.imei = phone
-		// Correct Register Response (0x8100)
 		response := service.GenerateJT808RegisterResponse(decoded[4:10], 0, seq, 0, "AUTH123")
 		s.conn.Write(response)
 		fmt.Println("📤 JT808 Register Response (0x8100) sent")
@@ -151,10 +155,11 @@ func (s *session) processJT808(data []byte) {
 				acc = "ON"
 			}
 			alarmStr := ""
-			if gps.Satellites != 0 {
-				alarmStr = fmt.Sprintf(" | 🚨 ALARM: 0x%08X", gps.Satellites)
+			if gps.Alarm != 0 {
+				alarmStr = fmt.Sprintf(" | 🚨 ALARM: 0x%08X", gps.Alarm)
 			}
-			fmt.Printf("📍 JT808 GPS [%s] %s | ACC: %s | Lat: %.6f, Lng: %.6f%s\n", s.imei, status, acc, gps.Latitude, gps.Longitude, alarmStr)
+			fmt.Printf("📍 JT808 GPS [%s] %s | ACC: %s | Lat: %.6f, Lng: %.6f | Speed: %.1f | Alt: %dm%s\n",
+				s.imei, status, acc, gps.Latitude, gps.Longitude, gps.Speed, gps.RSSI, alarmStr)
 		}
 		s.sendJT808ACK(decoded, 0)
 
@@ -162,19 +167,38 @@ func (s *session) processJT808(data []byte) {
 		fmt.Println("💓 JT808 Heartbeat from", phone)
 		s.sendJT808ACK(decoded, 0)
 
+	case 0x0704: // Batch Location Upload
+		fmt.Printf("📦 JT808 Batch Location Upload from %s (%d bytes)\n", phone, len(decoded))
+		s.sendJT808ACK(decoded, 0)
+
+	case 0x0900: // Data Uplink (Multimedia / AI events)
+		fmt.Printf("🤖 JT808 AI/Media Data from %s (%d bytes)\n", phone, len(decoded))
+		s.sendJT808ACK(decoded, 0)
+
+	case 0x0800, 0x0801: // Multimedia Event / Data Upload
+		fmt.Printf("📸 JT808 Multimedia from %s (%d bytes)\n", phone, len(decoded))
+		s.sendJT808ACK(decoded, 0)
+
 	default:
-		fmt.Printf("❓ Unknown JT808 ID: 0x%04X\n", msgID)
+		fmt.Printf("❓ Unknown JT808 ID: 0x%04X (%d bytes)\n", msgID, len(decoded))
+		s.sendJT808ACK(decoded, 0)
 	}
 }
 
 func (s *session) sendJT808ACK(decoded []byte, result byte) {
-	msgID := binary.BigEndian.Uint16(decoded[0:2])
-	phone := decoded[4:10]
-	seq := binary.BigEndian.Uint16(decoded[10:12])
-
+	_, _, seq, msgID, _ := service.ParseJT808Header(decoded)
+	// Use raw phone bytes from the decoded packet
+	var phone []byte
+	prop := binary.BigEndian.Uint16(decoded[2:4])
+	if (prop & 0x4000) != 0 {
+		phone = decoded[5:15]
+	} else {
+		phone = decoded[4:10]
+	}
 	response := service.GenerateJT808Response(phone, 0, seq, msgID, result)
 	s.conn.Write(response)
 }
+
 
 func (s *session) processPacket(data []byte) {
 	if len(data) < 5 {
