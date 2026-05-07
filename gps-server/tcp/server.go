@@ -150,7 +150,11 @@ func (s *session) processJT808(data []byte) {
 			if gps.Ignition {
 				acc = "ON"
 			}
-			fmt.Printf("📍 JT808 GPS [%s] %s | ACC: %s | Lat: %.6f, Lng: %.6f\n", s.imei, status, acc, gps.Latitude, gps.Longitude)
+			alarmStr := ""
+			if gps.Satellites != 0 {
+				alarmStr = fmt.Sprintf(" | 🚨 ALARM: 0x%08X", gps.Satellites)
+			}
+			fmt.Printf("📍 JT808 GPS [%s] %s | ACC: %s | Lat: %.6f, Lng: %.6f%s\n", s.imei, status, acc, gps.Latitude, gps.Longitude, alarmStr)
 		}
 		s.sendJT808ACK(decoded, 0)
 

@@ -137,6 +137,7 @@ func ParseJT808Location(data []byte) (*GpsData, string) {
 	
 	// Message Body for 0x0200:
 	// Alarm(4) + Status(4) + Lat(4) + Lon(4) + Alt(2) + Speed(2) + Course(2) + Time(6)
+	alarmRaw := binary.BigEndian.Uint32(body[0:4])
 	statusRaw := binary.BigEndian.Uint32(body[4:8])
 	latRaw := binary.BigEndian.Uint32(body[8:12])
 	lonRaw := binary.BigEndian.Uint32(body[12:16])
@@ -144,9 +145,6 @@ func ParseJT808Location(data []byte) (*GpsData, string) {
 	speedRaw := binary.BigEndian.Uint16(body[18:20])
 	course := binary.BigEndian.Uint16(body[20:22])
 	
-	// JT808 Status Bits:
-	// Bit 0: 0=ACC Off, 1=ACC On
-	// Bit 1: 0=Not Fixed, 1=Fixed
 	ignition := (statusRaw & 0x00000001) != 0
 	fixed := (statusRaw & 0x00000002) != 0
 	
@@ -158,9 +156,11 @@ func ParseJT808Location(data []byte) (*GpsData, string) {
 		Course:    course,
 		Valid:     fixed,
 		Ignition:  ignition,
+		Satellites: int(alarmRaw), // Temporarily using Satellites to pass the Alarm code
 		RSSI:      int(alt),
 	}, phone
 }
+
 
 // GetSequenceIndex extracts the sequence number from the end of the packet
 func GetSequenceIndex(data []byte) uint16 {
