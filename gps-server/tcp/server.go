@@ -124,7 +124,7 @@ func (s *session) processPacket(data []byte) {
 			s.sendACK(0x01, service.GetSequenceIndex(data))
 		}
 
-	case 0x12, 0x22, 0x10, 0x27: // GPS Data
+	case 0x12, 0x22, 0x10, 0x27, 0x1A: // GPS Data
 		if s.imei == "" {
 			fmt.Println("⚠️ GPS data received before login - ignoring")
 			return
@@ -134,19 +134,27 @@ func (s *session) processPacket(data []byte) {
 			fmt.Println("❌ Parse error:", err)
 			return
 		}
-		status := "OFFLINE"
+		status := "📡 OFFLINE"
 		if gps.Valid {
-			status = "ONLINE"
+			status = "🛰️ ONLINE"
 		}
 		fmt.Printf("📍 GPS [%s] %s: Lat: %.6f, Lng: %.6f, Speed: %.1f, Course: %d, Sats: %d\n", 
 			s.imei, status, gps.Latitude, gps.Longitude, gps.Speed, gps.Course, gps.Satellites)
 
-	case 0x13, 0x23: // Status (Heartbeat)
-		fmt.Println("💓 Heartbeat received")
+	case 0x13, 0x23, 0x16, 0x26: // Status / Heartbeat / LBS Status
+		info := "💓 Heartbeat"
+		if protocol == 0x16 || protocol == 0x26 {
+			info = "📶 LBS Status"
+		}
+		fmt.Printf("%s received from %s\n", info, s.imei)
 		s.sendACK(protocol, service.GetSequenceIndex(data))
 
-	case 0x15: // String (Command Response)
-		fmt.Println("💬 String/Command response received")
+	case 0x15, 0x21: // String / Command Response
+		fmt.Printf("💬 Command response received from %s\n", s.imei)
+
+	case 0x17, 0x18, 0x19: // LBS / WIFI / Multi-LBS
+		fmt.Printf("📶 LBS/WIFI data received from %s\n", s.imei)
+		s.sendACK(protocol, service.GetSequenceIndex(data))
 
 	default:
 		fmt.Printf("❓ Unknown protocol: 0x%02X, RAW: %s\n", protocol, hex.EncodeToString(data))

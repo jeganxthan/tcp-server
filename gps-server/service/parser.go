@@ -8,13 +8,19 @@ import (
 )
 
 type GpsData struct {
-	Time      time.Time
-	Latitude  float64
-	Longitude float64
-	Speed     float64
-	Course    uint16
-	Valid     bool
+	Time       time.Time
+	Latitude   float64
+	Longitude  float64
+	Speed      float64
+	Course     uint16
+	Valid      bool
 	Satellites int
+	// Extended Attributes (Traccar-style)
+	Ignition   bool
+	Charging   bool
+	PowerCut   bool
+	Battery    float64 // Percentage or Voltage
+	RSSI       int     // Signal strength
 }
 
 // ParseIMEI extracts the IMEI from a login packet (protocol 0x01)
@@ -22,9 +28,6 @@ func ParseIMEI(data []byte) string {
 	if len(data) < 12 {
 		return ""
 	}
-
-	// GT06 IMEI is 8 bytes, starts at index 4 in a standard 0x7878 packet
-	// It's often hex encoded, where the first digit might be a padding 0
 	imeiHex := hex.EncodeToString(data[4:12])
 	if len(imeiHex) > 15 && imeiHex[0] == '0' {
 		return imeiHex[1:]
@@ -32,10 +35,26 @@ func ParseIMEI(data []byte) string {
 	return imeiHex
 }
 
-// ParseGPS extracts GPS data from a packet (protocol 0x12 or 0x22 etc)
+// ParseStatus parses terminal information from protocol 0x13, 0x16, 0x23
+func ParseStatus(data []byte) (ignition, charging, powerCut bool, battery int) {
+	if len(data) < 5 {
+		return
+	}
+	// The status byte is usually after the protocol type
+	statusByte := data[4]
+	ignition = (statusByte & 0x02) != 0
+	charging = (statusByte & 0x04) != 0
+	powerCut = (statusByte & 0x08) == 0 // 0 means power cut in some variants
+	
+	// Battery level is often the next byte
+	if len(data) > 5 {
+		battery = int(data[5])
+	}
+	return
+}
+
+// ParseGPS extracts GPS data and terminal attributes
 func ParseGPS(data []byte) (*GpsData, error) {
-	// Header(2) + Length(1) + Protocol(1) = 4 bytes offset
-	// Date Time (6 bytes)
 	if len(data) < 30 {
 		return nil, fmt.Errorf("packet too short")
 	}
@@ -47,46 +66,33 @@ func ParseGPS(data []byte) (*GpsData, error) {
 	hour := int(data[offset+3])
 	minute := int(data[offset+4])
 	second := int(data[offset+5])
-	
 	gpsTime := time.Date(year, month, day, hour, minute, second, 0, time.UTC)
 	offset += 6
 	
-	// Satellites
 	sats := int(data[offset] & 0x0F)
 	offset += 1
 	
-	// Latitude
 	latRaw := binary.BigEndian.Uint32(data[offset : offset+4])
 	latitude := float64(latRaw) / 60.0 / 30000.0
 	offset += 4
 	
-	// Longitude
 	lonRaw := binary.BigEndian.Uint32(data[offset : offset+4])
 	longitude := float64(lonRaw) / 60.0 / 30000.0
 	offset += 4
 	
-	// Speed
 	speed := float64(data[offset])
 	offset += 1
 	
-	// Course & Status
 	courseStatus := binary.BigEndian.Uint16(data[offset : offset+2])
 	course := courseStatus & 0x3FF
 	
-	// Direction flags (matching Traccar logic)
-	// Bit 10: 1 = North, 0 = South
-	// Bit 11: 1 = West, 0 = East
-	// Bit 12: 1 = Fixed (Valid), 0 = Not Fixed
-	
-	if (courseStatus & 0x0400) == 0 { // South latitude
-		latitude = -latitude
-	}
-	if (courseStatus & 0x0800) != 0 { // West longitude
-		longitude = -longitude
-	}
-	
+	if (courseStatus & 0x0400) == 0 { latitude = -latitude }
+	if (courseStatus & 0x0800) != 0 { longitude = -longitude }
 	valid := (courseStatus & 0x1000) != 0
-	
+
+	// Check for optional terminal info at the end of some GPS packets
+	// Usually: [GPS Data] [LBS Data] [Terminal Info] ...
+	// This varies by model, but we can try to extract if packet is long enough
 	return &GpsData{
 		Time:       gpsTime,
 		Latitude:   latitude,
