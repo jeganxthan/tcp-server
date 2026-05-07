@@ -73,3 +73,28 @@ func GenerateJT808Response(phone []byte, seq uint16, msgSeq uint16, msgID uint16
 	
 	return final
 }
+
+// GenerateJT808RegisterResponse creates a 0x8100 response specifically for registration
+func GenerateJT808RegisterResponse(phone []byte, seq uint16, msgSeq uint16, result byte, authCode string) []byte {
+	// Body: MsgSeq(2) + Result(1) + AuthCode(string)
+	body := make([]byte, 3)
+	binary.BigEndian.PutUint16(body[0:2], msgSeq)
+	body[2] = result
+	body = append(body, []byte(authCode)...)
+
+	header := make([]byte, 12)
+	binary.BigEndian.PutUint16(header[0:2], 0x8100)
+	binary.BigEndian.PutUint16(header[2:4], uint16(len(body)))
+	copy(header[4:10], phone)
+	binary.BigEndian.PutUint16(header[10:12], seq)
+
+	packet := append(header, body...)
+	checksum := JT808_Checksum(packet)
+	
+	final := []byte{0x7E}
+	final = append(final, packet...)
+	final = append(final, checksum)
+	final = append(final, 0x7E)
+	
+	return final
+}

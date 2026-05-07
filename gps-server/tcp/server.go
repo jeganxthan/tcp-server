@@ -120,6 +120,7 @@ func (s *session) processJT808(data []byte) {
 
 	msgID := binary.BigEndian.Uint16(decoded[0:2])
 	phone := hex.EncodeToString(decoded[4:10])
+	seq := binary.BigEndian.Uint16(decoded[10:12])
 
 	fmt.Printf("🎥 JT808 Packet (%s) ID: 0x%04X, Phone: %s\n", s.conn.RemoteAddr(), msgID, phone)
 
@@ -127,7 +128,10 @@ func (s *session) processJT808(data []byte) {
 	case 0x0100: // Terminal Register
 		fmt.Println("📝 JT808 Registering:", phone)
 		s.imei = phone
-		s.sendJT808ACK(decoded, 0)
+		// Correct Register Response (0x8100)
+		response := service.GenerateJT808RegisterResponse(decoded[4:10], 0, seq, 0, "AUTH123")
+		s.conn.Write(response)
+		fmt.Println("📤 JT808 Register Response (0x8100) sent")
 
 	case 0x0102: // Terminal Authentication
 		fmt.Println("🔐 JT808 Authenticating:", phone)
