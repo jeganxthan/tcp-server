@@ -128,23 +128,29 @@ func DecodeJT808(data []byte) []byte {
 // ParseJT808Location extracts GPS from a 0x0200 message
 func ParseJT808Location(data []byte) (*GpsData, string) {
 	// Header: ID(2) + Property(2) + Phone(6 BCD) + Seq(2) = 12 bytes
-	if len(data) < 28 {
+	if len(data) < 40 {
 		return nil, ""
 	}
 	
-	// Phone number is the Device ID in JT808 (6 bytes BCD)
 	phone := hex.EncodeToString(data[4:10])
-	
-	// Message Body starts at index 12 (assuming no sub-packets)
 	body := data[12:]
 	
-	latRaw := binary.BigEndian.Uint32(body[4:8])
-	lonRaw := binary.BigEndian.Uint32(body[8:12])
+	// Message Body for 0x0200:
+	// Alarm(4) + Status(4) + Lat(4) + Lon(4) + Alt(2) + Speed(2) + Course(2) + Time(6)
+	latRaw := binary.BigEndian.Uint32(body[8:12])
+	lonRaw := binary.BigEndian.Uint32(body[12:16])
+	alt := binary.BigEndian.Uint16(body[16:18])
+	speedRaw := binary.BigEndian.Uint16(body[18:20]) // 1/10 km/h
+	course := binary.BigEndian.Uint16(body[20:22])
 	
 	return &GpsData{
+		Time:      time.Now(), // We can parse body[22:28] for exact BCD time if needed
 		Latitude:  float64(latRaw) / 1000000.0,
 		Longitude: float64(lonRaw) / 1000000.0,
+		Speed:     float64(speedRaw) / 10.0,
+		Course:    course,
 		Valid:     true,
+		RSSI:      int(alt), // Storing altitude here for now to see it in logs
 	}, phone
 }
 
